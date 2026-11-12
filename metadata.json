@@ -1,0 +1,6 @@
+{
+  "name": "Dragon 9 Science & Maths Lab",
+  "description": "Advanced Science & Maths Laboratory: 432Hz harmonic audio synthesizer, Bruce Cathie light-speed grid solver, geometric vector cipher, and Dragon 9 nonary temporal clock with 3D sovereign mesh visualization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
