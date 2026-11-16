@@ -5,7 +5,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { Activity, Waves, ChevronDown, ChevronUp, Zap, Sparkles } from 'lucide-react';
 
 import { NonaryClockState, AppTheme } from '../types/dragon';
-import { Live3DSnapshotRefs } from '../utils/export3DModel';
+import { Live3DSnapshotRefs, SceneSnapshotCapture } from '../utils/export3DModel';
 
 export type SceneMode = 'sovereign-core' | 'cathie-grid' | 'nonary-clock' | 'lissajous-wave';
 
@@ -52,6 +52,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameRef = useRef<number>(0);
   const timeoutIdRef = useRef<number>(0);
+  const captureSnapshotRef = useRef<(() => SceneSnapshotCapture | null) | null>(null);
   
   // Dynamic mesh references
   const coreGroupRef = useRef<THREE.Group | null>(null);
@@ -131,7 +132,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     }
   }, [theme]);
 
-  // Expose live mesh snapshot getter to parent for 3D model export
+  // Expose live mesh snapshot getter & high-res 2D capture to parent
   useEffect(() => {
     if (!onRegisterLiveRefs) return;
     onRegisterLiveRefs(() => ({
@@ -139,6 +140,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
       cathieGroup: cathieGridGroupRef.current,
       waveMesh: waveMeshRef.current,
       cymaticMesh: cymaticMeshRef.current,
+      captureSnapshot: () => (captureSnapshotRef.current ? captureSnapshotRef.current() : null),
     }));
   }, [onRegisterLiveRefs]);
 
@@ -797,6 +799,73 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
 
     tick();
 
+    // High-resolution 2D viewport snapshot capture (renders at 1280x720 synchronously, then restores viewport)
+    captureSnapshotRef.current = (): SceneSnapshotCapture | null => {
+      try {
+        const captureWidth = 1280;
+        const captureHeight = 720;
+        const prevSize = new THREE.Vector2();
+        renderer.getSize(prevSize);
+        const prevPixelRatio = renderer.getPixelRatio();
+        const prevAspect = camera.aspect;
+
+        renderer.setPixelRatio(1);
+        renderer.setSize(captureWidth, captureHeight, false);
+        camera.aspect = captureWidth / captureHeight;
+        camera.updateProjectionMatrix();
+        controls.update();
+        renderer.render(scene, camera);
+
+        const outCanvas = document.createElement('canvas');
+        outCanvas.width = captureWidth;
+        outCanvas.height = captureHeight;
+        const ctx = outCanvas.getContext('2d');
+
+        let dataUrl = '';
+        let mimeType = 'image/webp';
+
+        if (ctx) {
+          const bgHex =
+            scene.background instanceof THREE.Color
+              ? `#${scene.background.getHexString()}`
+              : '#030712';
+          ctx.fillStyle = bgHex;
+          ctx.fillRect(0, 0, captureWidth, captureHeight);
+          ctx.drawImage(renderer.domElement, 0, 0, captureWidth, captureHeight);
+
+          const webpUrl = outCanvas.toDataURL('image/webp', 0.92);
+          if (webpUrl.startsWith('data:image/webp')) {
+            dataUrl = webpUrl;
+            mimeType = 'image/webp';
+          } else {
+            dataUrl = outCanvas.toDataURL('image/jpeg', 0.92);
+            mimeType = 'image/jpeg';
+          }
+        } else {
+          dataUrl = renderer.domElement.toDataURL('image/png');
+          mimeType = 'image/png';
+        }
+
+        // Restore live viewport size, pixel ratio & camera aspect immediately
+        renderer.setPixelRatio(prevPixelRatio);
+        renderer.setSize(Math.max(1, prevSize.x), Math.max(1, prevSize.y), false);
+        camera.aspect = prevAspect;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+
+        return {
+          dataUrl,
+          width: captureWidth,
+          height: captureHeight,
+          mimeType,
+          capturedAt: new Date().toISOString(),
+        };
+      } catch (err) {
+        console.error('Failed to capture high-res 3D scene snapshot:', err);
+        return null;
+      }
+    };
+
     // 9. Resize Handling
     const handleResize = () => {
       if (!container) return;
@@ -810,6 +879,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
 
     // 10. Cleanup
     return () => {
+      captureSnapshotRef.current = null;
       window.removeEventListener('resize', handleResize);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);

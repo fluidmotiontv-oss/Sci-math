@@ -81,6 +81,7 @@ export type LogCategory =
   | 'CIPHER_GENERATE' 
   | 'AUDIO_SYNTH' 
   | 'GRID_UPDATE' 
+  | 'SCENE_SNAPSHOT'
   | 'SYSTEM_EVENT';
 
 export interface SessionLogEntry {
@@ -92,6 +93,7 @@ export interface SessionLogEntry {
   title: string;
   details: string;
   badge?: string;
+  thumbnailDataUrl?: string;
   metadata?: Record<string, any>;
 }
 

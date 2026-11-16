@@ -16,7 +16,10 @@ import {
   Activity, 
   Terminal, 
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  Camera,
+  Maximize2,
+  X
 } from 'lucide-react';
 
 interface SessionLogViewProps {
@@ -36,6 +39,7 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
   const [downloaded, setDownloaded] = useState<boolean>(false);
+  const [expandedSnapshot, setExpandedSnapshot] = useState<SessionLogEntry | null>(null);
 
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -99,6 +103,13 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
           icon: Activity,
           dotColor: 'bg-yellow-400 lab:bg-yellow-600',
         };
+      case 'SCENE_SNAPSHOT':
+        return {
+          label: 'SNAPSHOT',
+          color: 'text-teal-300 bg-teal-950/80 border-teal-700 cyber:bg-black cyber:text-emerald-300 cyber:border-emerald-400 lab:bg-emerald-50 lab:text-emerald-800 lab:border-emerald-300',
+          icon: Camera,
+          dotColor: 'bg-teal-400 lab:bg-emerald-600',
+        };
       case 'SYSTEM_EVENT':
       default:
         return {
@@ -108,6 +119,19 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
           dotColor: 'bg-slate-400 lab:bg-slate-600',
         };
     }
+  };
+
+  const handleDownloadSnapshot = (log: SessionLogEntry) => {
+    if (!log.thumbnailDataUrl) return;
+    const mimeMatch = log.thumbnailDataUrl.match(/^data:image\/([a-zA-Z0-9+]+);/);
+    const ext = mimeMatch ? (mimeMatch[1] === 'jpeg' ? 'jpg' : mimeMatch[1]) : 'png';
+    const modeSlug = typeof log.metadata?.sceneMode === 'string' ? log.metadata.sceneMode : 'scene';
+    const link = document.createElement('a');
+    link.href = log.thumbnailDataUrl;
+    link.download = `dragon9-snapshot-${modeSlug}-${Date.now()}.${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleCopySingle = (log: SessionLogEntry) => {
@@ -242,7 +266,7 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
           <span className="text-[10px] text-slate-500 cyber:text-zinc-300 lab:text-slate-500 uppercase flex items-center gap-1 pr-1 shrink-0">
             <Filter className="w-3 h-3" /> Filter:
           </span>
-          {(['ALL', 'TAB_SWITCH', 'CONFIG_CHANGE', 'CIPHER_GENERATE', 'AUDIO_SYNTH', 'GRID_UPDATE'] as const).map(
+          {(['ALL', 'SCENE_SNAPSHOT', 'TAB_SWITCH', 'CONFIG_CHANGE', 'CIPHER_GENERATE', 'AUDIO_SYNTH', 'GRID_UPDATE'] as const).map(
             (cat) => {
               const isActive = selectedCategory === cat;
               return (
@@ -255,7 +279,7 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
                       : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 cyber:bg-black cyber:text-zinc-300 cyber:border-cyan-500/40 lab:bg-slate-50 lab:text-slate-600 lab:border-slate-300 lab:hover:text-slate-900'
                   }`}
                 >
-                  {cat === 'ALL' ? 'ALL' : cat.replace('_', ' ')}
+                  {cat === 'ALL' ? 'ALL' : cat === 'SCENE_SNAPSHOT' ? 'SNAPSHOTS' : cat.replace('_', ' ')}
                 </button>
               );
             }
@@ -333,6 +357,52 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
                   </div>
                 </div>
 
+                {/* Visual 2D Scene Snapshot Thumbnail if present */}
+                {log.thumbnailDataUrl && (
+                  <div className="mt-1.5 pl-3 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedSnapshot(log)}
+                      className="relative group/thumb w-56 sm:w-64 aspect-video rounded-lg overflow-hidden border border-teal-500/40 hover:border-cyan-400 cyber:border-emerald-400 lab:border-slate-300 bg-slate-950 shadow-md cursor-pointer shrink-0 transition-colors"
+                      title="Inspect full-resolution 3D scene snapshot"
+                    >
+                      <img
+                        src={log.thumbnailDataUrl}
+                        alt={log.title}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-slate-950/90 text-teal-300 border border-teal-500/40 text-[9px] font-mono font-bold flex items-center gap-1">
+                        <Maximize2 className="w-2.5 h-2.5" />
+                        <span>{log.badge || '1280×720'}</span>
+                      </div>
+                    </button>
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] text-teal-300 cyber:text-emerald-300 lab:text-emerald-800 font-bold uppercase tracking-wider flex items-center gap-1">
+                        <Camera className="w-3 h-3" />
+                        <span>Visual 3D Viewport Record</span>
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedSnapshot(log)}
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 cyber:bg-black cyber:text-cyan-300 cyber:border-cyan-400 lab:bg-white lab:text-sky-700 lab:border-slate-300 text-[10px] font-bold cursor-pointer transition-colors"
+                        >
+                          <Maximize2 className="w-3 h-3" />
+                          <span>INSPECT FULL-RES</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSnapshot(log)}
+                          className="flex items-center gap-1 px-2 py-1 rounded bg-teal-500/15 hover:bg-teal-500/30 text-teal-200 border border-teal-500/40 cyber:bg-emerald-400 cyber:text-black lab:bg-emerald-600 lab:text-white lab:hover:bg-emerald-700 text-[10px] font-bold cursor-pointer transition-colors"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>DOWNLOAD IMAGE</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Metadata JSON Tags if present */}
                 {log.metadata && Object.keys(log.metadata).length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1.5 pl-3">
@@ -360,6 +430,61 @@ export const SessionLogView: React.FC<SessionLogViewProps> = ({
         <span>Persistent Audit Storage: LocalStorage (`dragon9_session_logs`)</span>
         <span>Showing {filteredLogs.length} of {logs.length} entries</span>
       </div>
+
+      {/* Full-Resolution Snapshot Lightbox Modal */}
+      {expandedSnapshot && expandedSnapshot.thumbnailDataUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4"
+          onClick={() => setExpandedSnapshot(null)}
+        >
+          <div
+            className="max-w-5xl w-full bg-slate-900 cyber:bg-black lab:bg-white border border-cyan-500/50 cyber:border-cyan-400 lab:border-slate-300 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 cyber:border-cyan-500/40 lab:border-slate-200">
+              <div className="flex items-center gap-2 min-w-0">
+                <Camera className="w-4 h-4 text-teal-400 lab:text-emerald-600 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-100 cyber:text-white lab:text-slate-900 truncate">
+                    {expandedSnapshot.title}
+                  </div>
+                  <div className="text-[10px] text-slate-400 cyber:text-zinc-300 lab:text-slate-600">
+                    {expandedSnapshot.timeFormatted} • {expandedSnapshot.badge || '1280×720'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadSnapshot(expandedSnapshot)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/35 text-teal-200 border border-teal-400/50 cyber:bg-emerald-400 cyber:text-black lab:bg-emerald-600 lab:text-white text-[11px] font-bold cursor-pointer transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Full Image</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExpandedSnapshot(null)}
+                  aria-label="Close snapshot preview"
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cyber:bg-zinc-900 cyber:text-white lab:bg-slate-100 lab:text-slate-700 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="p-3 bg-slate-950 cyber:bg-black lab:bg-slate-900 flex items-center justify-center">
+              <img
+                src={expandedSnapshot.thumbnailDataUrl}
+                alt={expandedSnapshot.title}
+                className="w-full max-h-[72vh] object-contain rounded-lg border border-slate-800"
+              />
+            </div>
+            <div className="px-4 py-2.5 border-t border-slate-800 cyber:border-cyan-500/40 lab:border-slate-200 text-[11px] text-slate-300 cyber:text-zinc-200 lab:text-slate-700 font-sans">
+              {expandedSnapshot.details}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

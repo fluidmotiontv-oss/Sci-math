@@ -1,26 +1,62 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Waves,
   Sparkles,
   Sliders,
   Play,
   Square,
   RotateCcw,
-  Volume2,
   CheckCircle2,
   Activity,
   Zap,
   Layers,
   ArrowRight,
-  TrendingUp,
+  Download,
+  Save,
+  Upload,
+  Trash2,
+  FileJson,
 } from 'lucide-react';
 import { AppTheme, LogCategory } from '../types/dragon';
 import { audioEngine } from '../utils/audioEngine';
 import {
+  getIntervalById,
   HARMONIC_INTERVAL_FAMILIES,
   HarmonicInterval,
   HarmonicIntervalFamily,
 } from '../utils/harmonicIntervals';
+import { D3HarmonicBarAnalyzer } from './D3HarmonicBarAnalyzer';
+
+const RESONATOR_PRESETS_STORAGE_KEY = 'dragon9_harmonic_resonator_presets_v1';
+
+export interface SavedHarmonicPreset {
+  id: string;
+  presetName: string;
+  savedAt: string;
+  fundamentalBaseHz: number;
+  modulatedFrequencyHz: number;
+  familyId: HarmonicIntervalFamily;
+  familyTitle: string;
+  interval: HarmonicInterval;
+  lfo: {
+    enabled: boolean;
+    rateHz: number;
+    depthPct: number;
+    waveform: 'sine' | 'triangle' | 'pulse';
+  };
+}
+
+function loadSavedResonatorPresets(): SavedHarmonicPreset[] {
+  try {
+    const raw = localStorage.getItem(RESONATOR_PRESETS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore invalid storage
+  }
+  return [];
+}
 
 interface HarmonicResonatorLabProps {
   currentBaseFrequency: number;
@@ -54,10 +90,25 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
   const [lfoDepthPct, setLfoDepthPct] = useState<number>(45); // 0 - 100%
   const [lfoWaveform, setLfoWaveform] = useState<'sine' | 'triangle' | 'pulse'>('sine');
 
+  // Save Preset (.JSON) state
+  const [savedPresets, setSavedPresets] = useState<SavedHarmonicPreset[]>(loadSavedResonatorPresets);
+  const [presetNameInput, setPresetNameInput] = useState<string>('');
+  const [presetFeedback, setPresetFeedback] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(null);
+
   // Animation & LFO Refs
   const lfoAnimRef = useRef<number>(0);
   const lfoStartTimeRef = useRef<number>(performance.now());
   const visualPhaseRef = useRef<number>(0);
+
+  // Persist saved presets list cleanly
+  useEffect(() => {
+    try {
+      localStorage.setItem(RESONATOR_PRESETS_STORAGE_KEY, JSON.stringify(savedPresets.slice(0, 30)));
+    } catch {
+      // ignore storage quota
+    }
+  }, [savedPresets]);
 
   // Sync fundamentalBase when parent changes base externally
   useEffect(() => {
@@ -72,6 +123,7 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
   // Calculate target frequency for active interval
   const activeRatio = activeInterval ? activeInterval.ratioDecimal : 1.0;
   const calculatedTargetFreq = Math.round(fundamentalBase * activeRatio * 100) / 100;
+  const liveOscillatorFreq = isLfoActive ? currentBaseFrequency : calculatedTargetFreq;
 
   // LFO Modulation loop
   useEffect(() => {
@@ -168,6 +220,137 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
     );
   };
 
+  const buildCurrentPresetPayload = (customName?: string): SavedHarmonicPreset => {
+    const interval = activeInterval ?? activeFamily.intervals[0];
+    const resolvedName =
+      (customName ?? presetNameInput).trim() ||
+      `${interval.name} (${fundamentalBase}Hz × ${interval.ratioFraction})`;
+
+    return {
+      id: `hpreset_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      presetName: resolvedName,
+      savedAt: new Date().toISOString(),
+      fundamentalBaseHz: fundamentalBase,
+      modulatedFrequencyHz: calculatedTargetFreq,
+      familyId: activeFamily.id,
+      familyTitle: activeFamily.title,
+      interval,
+      lfo: {
+        enabled: isLfoActive,
+        rateHz: lfoRateHz,
+        depthPct: lfoDepthPct,
+        waveform: lfoWaveform,
+      },
+    };
+  };
+
+  const downloadPresetJsonFile = (preset: SavedHarmonicPreset) => {
+    const filePayload = {
+      schema: 'dragon9.harmonic_resonator.preset.v1',
+      exportedAt: new Date().toISOString(),
+      preset,
+      oscillatorSnapshot: {
+        isAudioPlaying,
+        liveFrequencyHz: liveOscillatorFreq,
+        subHarmonicsActive: audioEngine.getSubHarmonicsActive(),
+        subHarmonicLayers: audioEngine.getSubHarmonicLayers(),
+      },
+    };
+
+    const jsonString = JSON.stringify(filePayload, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const slug = preset.presetName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40);
+    const filename = `dragon9-harmonic-preset-${slug || 'interval'}-${Math.round(preset.modulatedFrequencyHz)}hz.json`;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return filename;
+  };
+
+  const handleSavePresetToJson = () => {
+    setPresetError(null);
+    const preset = buildCurrentPresetPayload();
+    setSavedPresets((prev) => [preset, ...prev].slice(0, 30));
+    const filename = downloadPresetJsonFile(preset);
+    setPresetNameInput('');
+    setPresetFeedback(`Saved "${preset.presetName}" to ${filename}`);
+    window.setTimeout(() => setPresetFeedback(null), 3500);
+
+    onLogEvent?.(
+      'CONFIG_CHANGE',
+      `Harmonic Preset Saved: ${preset.presetName}`,
+      `Saved ${preset.familyTitle} interval "${preset.interval.name}" (${preset.modulatedFrequencyHz}Hz) to local JSON file ${filename}.`,
+      {
+        presetName: preset.presetName,
+        filename,
+        familyId: preset.familyId,
+        intervalId: preset.interval.id,
+        fundamentalBaseHz: preset.fundamentalBaseHz,
+        modulatedFrequencyHz: preset.modulatedFrequencyHz,
+      }
+    );
+  };
+
+  const handleApplySavedPreset = (preset: SavedHarmonicPreset) => {
+    setPresetError(null);
+    setSelectedFamilyId(preset.familyId);
+    setFundamentalBase(preset.fundamentalBaseHz);
+    const resolvedInterval = getIntervalById(preset.interval.id) ?? preset.interval;
+    setActiveInterval(resolvedInterval);
+    setIsLfoActive(preset.lfo.enabled);
+    setLfoRateHz(preset.lfo.rateHz);
+    setLfoDepthPct(preset.lfo.depthPct);
+    setLfoWaveform(preset.lfo.waveform);
+
+    const targetHz = Math.max(20, Math.min(2000, preset.modulatedFrequencyHz));
+    audioEngine.setFrequency(targetHz);
+    onFrequencyChange(targetHz);
+
+    setPresetFeedback(`Loaded preset "${preset.presetName}" (${targetHz}Hz)`);
+    window.setTimeout(() => setPresetFeedback(null), 2800);
+
+    onLogEvent?.(
+      'AUDIO_SYNTH',
+      `Harmonic Preset Loaded: ${preset.presetName}`,
+      `Applied saved interval "${resolvedInterval.name}" at ${targetHz}Hz (base ${preset.fundamentalBaseHz}Hz).`,
+      { presetName: preset.presetName, targetHz }
+    );
+  };
+
+  const handleImportPresetJson = async (file: File | undefined) => {
+    if (!file) return;
+    setPresetError(null);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const candidate: SavedHarmonicPreset | undefined = parsed?.preset ?? (parsed?.interval ? parsed : undefined);
+      if (!candidate || !candidate.interval || typeof candidate.fundamentalBaseHz !== 'number') {
+        throw new Error('Invalid Dragon 9 harmonic preset JSON structure.');
+      }
+      const normalized: SavedHarmonicPreset = {
+        ...candidate,
+        id: candidate.id || `hpreset_imp_${Date.now()}`,
+        presetName: candidate.presetName || file.name.replace(/\.json$/i, ''),
+        savedAt: candidate.savedAt || new Date().toISOString(),
+        lfo: candidate.lfo ?? { enabled: false, rateHz: 0.54, depthPct: 45, waveform: 'sine' },
+      };
+      setSavedPresets((prev) => [normalized, ...prev].slice(0, 30));
+      handleApplySavedPreset(normalized);
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : 'Unable to parse harmonic preset JSON file.');
+    }
+  };
+
   // SVG Sacred Harmonic Lissajous Node Visualizer Path
   const renderHarmonicSvgPath = () => {
     const k = activeInterval ? activeInterval.ratioDecimal : 1.0;
@@ -201,7 +384,7 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleTogglePlay}
@@ -213,6 +396,16 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
           >
             {isAudioPlaying ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
             <span>{isAudioPlaying ? 'HALT OSCILLATOR' : 'START AUDIO'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSavePresetToJson}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500/25 text-xs font-mono font-bold text-emerald-300 cyber:bg-emerald-400 cyber:text-black cyber:border-white lab:bg-emerald-700 lab:hover:bg-emerald-800 lab:text-white lab:border-emerald-800 transition-colors cursor-pointer"
+            title="Save current oscillator harmonic interval configuration to a local .json file"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>SAVE PRESET (.JSON)</span>
           </button>
 
           <button
@@ -304,6 +497,17 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Real-Time D3 Frequency Domain Bar Analyzer */}
+      <D3HarmonicBarAnalyzer
+        isPlaying={isAudioPlaying}
+        fundamentalBaseHz={fundamentalBase}
+        activeFrequencyHz={liveOscillatorFreq}
+        intervalLabel={activeInterval?.name ?? 'Unison'}
+        intervalRatio={activeRatio}
+        isLfoActive={isLfoActive}
+        theme={theme}
+      />
 
       {/* Fundamental Base Frequency Calibration & Presets */}
       <div className="bg-slate-900/60 cyber:bg-black lab:bg-slate-50 border border-slate-800 cyber:border-cyan-400/60 lab:border-slate-200 rounded-xl p-4 flex flex-col gap-3">
@@ -588,6 +792,113 @@ export const HarmonicResonatorLab: React.FC<HarmonicResonatorLabProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Save Harmonic Interval Preset (.JSON) & Local Library */}
+      <div className="bg-slate-900/60 cyber:bg-black lab:bg-slate-50 border border-slate-800 cyber:border-cyan-400/60 lab:border-slate-200 rounded-xl p-4 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 cyber:border-cyan-500/40 lab:border-slate-200 pb-2.5">
+          <div className="flex items-center gap-2">
+            <FileJson className="w-4 h-4 text-emerald-400 cyber:text-emerald-300 lab:text-emerald-600" />
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200 cyber:text-white lab:text-slate-800">
+              Save &amp; Export Harmonic Interval Presets (.JSON)
+            </span>
+          </div>
+
+          <label className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-950 hover:border-cyan-400 text-slate-300 hover:text-cyan-300 cyber:bg-black cyber:border-cyan-500/50 cyber:text-white lab:bg-white lab:border-slate-300 lab:text-slate-700 text-[11px] font-mono cursor-pointer transition-colors">
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import Preset .JSON</span>
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                handleImportPresetJson(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={presetNameInput}
+            onChange={(e) => setPresetNameInput(e.target.value)}
+            placeholder={`${activeInterval?.name ?? 'Harmonic Interval'} (${fundamentalBase}Hz × ${activeInterval?.ratioFraction ?? '1/1'})`}
+            className="flex-1 min-w-[220px] bg-slate-950 cyber:bg-black lab:bg-white border border-slate-800 cyber:border-cyan-400/70 lab:border-slate-300 text-slate-200 cyber:text-white lab:text-slate-900 font-mono text-xs px-3 py-2 rounded-lg focus:outline-none focus:border-cyan-400 lab:focus:border-sky-600"
+          />
+          <button
+            type="button"
+            onClick={handleSavePresetToJson}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 cyber:bg-emerald-400 cyber:text-black lab:bg-emerald-700 lab:hover:bg-emerald-800 lab:text-white font-mono text-xs font-bold cursor-pointer transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>SAVE PRESET TO JSON FILE</span>
+          </button>
+        </div>
+
+        {presetFeedback && (
+          <div className="text-xs font-mono text-emerald-300 cyber:text-emerald-300 lab:text-emerald-700 bg-emerald-950/30 cyber:bg-black lab:bg-emerald-50 border border-emerald-500/40 lab:border-emerald-300 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            <span>{presetFeedback}</span>
+          </div>
+        )}
+
+        {presetError && (
+          <div className="text-xs font-mono text-rose-300 lab:text-rose-700 bg-rose-950/30 lab:bg-rose-50 border border-rose-500/40 lab:border-rose-300 px-3 py-1.5 rounded-lg">
+            {presetError}
+          </div>
+        )}
+
+        {savedPresets.length > 0 && (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 pt-1">
+            {savedPresets.map((preset) => (
+              <div
+                key={preset.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-950/80 cyber:bg-black lab:bg-white border border-slate-800 cyber:border-cyan-500/40 lab:border-slate-200 text-xs font-mono"
+              >
+                <div className="min-w-0">
+                  <div className="font-bold text-slate-100 cyber:text-white lab:text-slate-900 truncate">
+                    {preset.presetName}
+                  </div>
+                  <div className="text-[10px] text-slate-400 cyber:text-zinc-300 lab:text-slate-600">
+                    {preset.familyId} · {preset.interval.ratioFraction} · Base {preset.fundamentalBaseHz}Hz →{' '}
+                    <span className="text-cyan-300 cyber:text-cyan-300 lab:text-sky-700 font-bold">
+                      {preset.modulatedFrequencyHz}Hz
+                    </span>
+                    {preset.lfo.enabled ? ` · LFO ${preset.lfo.rateHz}Hz` : ''}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleApplySavedPreset(preset)}
+                    className="px-2.5 py-1 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 cyber:bg-cyan-400 cyber:text-black lab:bg-sky-50 lab:text-sky-800 lab:border-sky-300 text-[10px] font-bold cursor-pointer"
+                  >
+                    LOAD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadPresetJsonFile(preset)}
+                    className="p-1.5 rounded border border-slate-700 text-slate-300 hover:text-emerald-300 cyber:border-cyan-500/50 lab:border-slate-300 lab:text-slate-700 cursor-pointer"
+                    title="Re-download preset .JSON file"
+                  >
+                    <Download className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSavedPresets((prev) => prev.filter((p) => p.id !== preset.id))}
+                    className="p-1.5 rounded border border-slate-800 text-slate-500 hover:text-rose-400 lab:border-slate-200 cursor-pointer"
+                    title="Remove preset from saved list"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

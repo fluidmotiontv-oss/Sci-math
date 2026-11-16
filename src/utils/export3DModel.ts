@@ -15,11 +15,20 @@ export type Export3DTarget =
 
 export type ViewportSceneMode = 'sovereign-core' | 'cathie-grid' | 'nonary-clock' | 'lissajous-wave';
 
+export interface SceneSnapshotCapture {
+  dataUrl: string;
+  width: number;
+  height: number;
+  mimeType: string;
+  capturedAt: string;
+}
+
 export interface Live3DSnapshotRefs {
   coreGroup: THREE.Group | null;
   cathieGroup: THREE.Group | null;
   waveMesh: THREE.Line | null;
   cymaticMesh: THREE.Mesh | null;
+  captureSnapshot?: () => SceneSnapshotCapture | null;
 }
 
 export interface Export3DBuildParams {

@@ -7,7 +7,7 @@ import { audioEngine } from './utils/audioEngine';
 import { Live3DSnapshotRefs } from './utils/export3DModel';
 import { Header } from './components/Header';
 import { ThreeViewport, SceneMode } from './components/ThreeViewport';
-import { ThreeControlDock } from './components/ThreeControlDock';
+import { ThreeControlDock, SnapshotCaptureOutcome } from './components/ThreeControlDock';
 import { AudioSynthesizerLab } from './components/AudioSynthesizerLab';
 import { CathieGridLab } from './components/CathieGridLab';
 import { VectorCipherLab } from './components/VectorCipherLab';
@@ -126,12 +126,13 @@ export default function App() {
   // Persistent Session Logs State
   const [sessionLogs, setSessionLogs] = useState<SessionLogEntry[]>(getInitialLogs);
 
-  // Helper function to append and persist log entries
+  // Helper function to append and persist log entries (with quota-safe thumbnail trimming)
   const addLogEntry = (
     category: LogCategory,
     title: string,
     details: string,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
+    extra?: { thumbnailDataUrl?: string; badge?: string }
   ) => {
     const now = new Date();
     const timeFormatted = now.toLocaleTimeString();
@@ -143,15 +144,37 @@ export default function App() {
       category,
       title,
       details,
+      badge: extra?.badge,
+      thumbnailDataUrl: extra?.thumbnailDataUrl,
       metadata,
     };
 
     setSessionLogs((prev) => {
       const updated = [...prev, newEntry];
+      const toStore = updated.slice(-250);
       try {
-        localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated.slice(-250)));
-      } catch (e) {
-        console.error('Failed to save session log to localStorage', e);
+        localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(toStore));
+      } catch {
+        // Fallback if embedded thumbnails exceed localStorage quota: keep newest 12 thumbnails
+        try {
+          let keptThumbs = 0;
+          const pruned = [...toStore]
+            .reverse()
+            .map((entry) => {
+              if (entry.thumbnailDataUrl) {
+                keptThumbs += 1;
+                if (keptThumbs > 12) {
+                  const { thumbnailDataUrl: _drop, ...rest } = entry;
+                  return rest;
+                }
+              }
+              return entry;
+            })
+            .reverse();
+          localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(pruned));
+        } catch (e2) {
+          console.error('Failed to save session log to localStorage', e2);
+        }
       }
       return updated;
     });
@@ -417,6 +440,61 @@ export default function App() {
     setIsGuideOpen((prev) => !prev);
   };
 
+  const handleCaptureSceneSnapshot = (): SnapshotCaptureOutcome | null => {
+    const refs = getLive3DSnapshotRefs();
+    const snap = refs?.captureSnapshot?.();
+    if (!snap || !snap.dataUrl) {
+      return { ok: false };
+    }
+
+    const modeLabels: Record<SceneMode, string> = {
+      'sovereign-core': 'Sovereign Core',
+      'cathie-grid': 'Bruce Cathie Geodesic Grid',
+      'nonary-clock': 'Nonary Temporal Clock',
+      'lissajous-wave': '432Hz Acoustic Waveform',
+    };
+    const sceneLabel = modeLabels[sceneMode] || sceneMode;
+    const resolution = `${snap.width}×${snap.height}`;
+    const title = `3D Scene Snapshot: ${sceneLabel}`;
+    const details = `Captured ${resolution} 2D visual thumbnail of the ${sceneLabel} viewport (${cameraPreset} cam, ${audioFrequency}Hz, wireframe ${wireframeOnly ? 'ON' : 'OFF'}, α ${nodeConfig.polarityAlpha}% / β ${nodeConfig.polarityBeta}%).`;
+
+    addLogEntry(
+      'SCENE_SNAPSHOT',
+      title,
+      details,
+      {
+        sceneMode,
+        cameraPreset,
+        resolution,
+        frequency: `${audioFrequency}Hz`,
+        audioActive: isAudioPlaying,
+        wireframe: wireframeOnly,
+        polarityAlpha: `${nodeConfig.polarityAlpha}%`,
+        polarityBeta: `${nodeConfig.polarityBeta}%`,
+      },
+      {
+        thumbnailDataUrl: snap.dataUrl,
+        badge: resolution,
+      }
+    );
+
+    return {
+      ok: true,
+      previewUrl: snap.dataUrl,
+      title,
+      resolution,
+    };
+  };
+
+  const handleJumpToSessionLog = () => {
+    setIsCinemaMode(false);
+    setActiveTab('config');
+    setVisitedChambers((prev) => (prev.includes('config') ? prev : [...prev, 'config']));
+    window.setTimeout(() => {
+      document.getElementById('session-log-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 90);
+  };
+
   const handleThemeChange = (nextTheme: AppTheme) => {
     if (nextTheme === theme) return;
     setTheme(nextTheme);
@@ -528,6 +606,8 @@ export default function App() {
             isGuideOpen={isGuideOpen}
             onOpenExport3D={() => setIsExport3DModalOpen(true)}
             onOpenVideoStudio={() => setIsVideoStudioOpen(true)}
+            onCaptureSnapshot={handleCaptureSceneSnapshot}
+            onJumpToSessionLog={handleJumpToSessionLog}
           />
 
           {/* Collapsible Model Progression Drawer in Zen Mode */}
@@ -654,6 +734,8 @@ export default function App() {
                   isGuideOpen={isGuideOpen}
                   onOpenExport3D={() => setIsExport3DModalOpen(true)}
                   onOpenVideoStudio={() => setIsVideoStudioOpen(true)}
+                  onCaptureSnapshot={handleCaptureSceneSnapshot}
+                  onJumpToSessionLog={handleJumpToSessionLog}
                 />
               </div>
             )}

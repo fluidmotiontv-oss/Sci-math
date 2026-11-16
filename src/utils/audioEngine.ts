@@ -378,6 +378,10 @@ class DragonAudioEngine {
     return this.analyser;
   }
 
+  public getSampleRate(): number {
+    return this.audioCtx?.sampleRate ?? 48000;
+  }
+
   public getIsRunning(): boolean {
     return this.isRunning;
   }

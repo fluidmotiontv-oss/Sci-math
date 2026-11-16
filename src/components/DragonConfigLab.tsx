@@ -1545,11 +1545,13 @@ module.exports = {
       </div>
 
       {/* SECTION 3: PERSISTENT LABORATORY SESSION AUDIT LOG */}
-      <SessionLogView
-        logs={logs}
-        onClearLogs={onClearLogs}
-        onAddTestEntry={onAddTestEntry}
-      />
+      <div id="session-log-section">
+        <SessionLogView
+          logs={logs}
+          onClearLogs={onClearLogs}
+          onAddTestEntry={onAddTestEntry}
+        />
+      </div>
     </div>
   );
 };

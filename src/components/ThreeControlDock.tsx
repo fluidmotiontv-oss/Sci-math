@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { SceneMode } from './ThreeViewport';
-import { Eye, ChevronDown, ChevronUp, Box, RotateCw, Compass, Shield, BookOpen, Zap, Download, Film } from 'lucide-react';
+import { Eye, ChevronDown, ChevronUp, Box, RotateCw, Compass, Shield, BookOpen, Zap, Download, Film, Camera, Check, ExternalLink, X } from 'lucide-react';
+
+export interface SnapshotCaptureOutcome {
+  ok: boolean;
+  previewUrl?: string;
+  title?: string;
+  resolution?: string;
+}
 
 interface ThreeControlDockProps {
   sceneMode: SceneMode;
@@ -21,6 +28,8 @@ interface ThreeControlDockProps {
   isGuideOpen?: boolean;
   onOpenExport3D?: () => void;
   onOpenVideoStudio?: () => void;
+  onCaptureSnapshot?: () => SnapshotCaptureOutcome | null;
+  onJumpToSessionLog?: () => void;
 }
 
 export const ThreeControlDock: React.FC<ThreeControlDockProps> = ({
@@ -42,8 +51,46 @@ export const ThreeControlDock: React.FC<ThreeControlDockProps> = ({
   isGuideOpen = false,
   onOpenExport3D,
   onOpenVideoStudio,
+  onCaptureSnapshot,
+  onJumpToSessionLog,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [justCaptured, setJustCaptured] = useState(false);
+  const [snapshotFeedback, setSnapshotFeedback] = useState<{
+    previewUrl?: string;
+    title: string;
+    resolution: string;
+  } | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSnapshotClick = () => {
+    if (!onCaptureSnapshot) return;
+    const outcome = onCaptureSnapshot();
+    if (outcome && outcome.ok) {
+      setJustCaptured(true);
+      setSnapshotFeedback({
+        previewUrl: outcome.previewUrl,
+        title: outcome.title || '3D Scene Snapshot Logged',
+        resolution: outcome.resolution || '1280×720',
+      });
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+      feedbackTimerRef.current = window.setTimeout(() => {
+        setJustCaptured(false);
+        setSnapshotFeedback(null);
+        feedbackTimerRef.current = null;
+      }, 5000);
+    }
+  };
 
   return (
     <div
@@ -57,6 +104,49 @@ export const ThreeControlDock: React.FC<ThreeControlDockProps> = ({
       }}
       className="flex flex-col items-center pointer-events-auto transition-all duration-300"
     >
+      {/* Snapshot Confirmation Preview Toast */}
+      {snapshotFeedback && (
+        <div className="mb-2 flex items-center gap-2.5 bg-slate-950 cyber:bg-black lab:bg-white border border-emerald-500/60 cyber:border-emerald-400 lab:border-emerald-500 rounded-xl px-2.5 py-1.5 shadow-2xl text-xs font-mono">
+          {snapshotFeedback.previewUrl && (
+            <img
+              src={snapshotFeedback.previewUrl}
+              alt="Captured 3D scene snapshot thumbnail"
+              className="w-16 h-9 rounded object-cover border border-emerald-400/50 shrink-0 bg-slate-900"
+            />
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="text-emerald-300 cyber:text-emerald-300 lab:text-emerald-800 font-bold text-[11px] flex items-center gap-1 whitespace-nowrap">
+              <Check className="w-3.5 h-3.5 text-emerald-400 lab:text-emerald-600 shrink-0" />
+              <span>Added to Session Log ({snapshotFeedback.resolution})</span>
+            </span>
+            <span className="text-slate-400 cyber:text-zinc-300 lab:text-slate-600 text-[10px] truncate max-w-[220px]">
+              {snapshotFeedback.title}
+            </span>
+          </div>
+          {onJumpToSessionLog && (
+            <button
+              type="button"
+              onClick={() => {
+                setSnapshotFeedback(null);
+                onJumpToSessionLog();
+              }}
+              className="ml-1 px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-200 border border-emerald-500/50 cyber:bg-emerald-400 cyber:text-black lab:bg-emerald-600 lab:text-white lab:hover:bg-emerald-700 text-[10px] font-bold flex items-center gap-1 whitespace-nowrap cursor-pointer transition-colors"
+            >
+              <span>View Log</span>
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setSnapshotFeedback(null)}
+            aria-label="Dismiss snapshot confirmation"
+            className="p-0.5 text-slate-500 hover:text-slate-200 lab:text-slate-400 lab:hover:text-slate-700 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Collapse / Expand Toggle Button */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
@@ -203,6 +293,24 @@ export const ThreeControlDock: React.FC<ThreeControlDockProps> = ({
               >
                 <BookOpen className="w-3.5 h-3.5 text-cyan-400 cyber:text-inherit lab:text-inherit" />
                 <span>Explain Model</span>
+              </button>
+            )}
+
+            {/* Capture Scene Snapshot Button */}
+            {onCaptureSnapshot && (
+              <button
+                type="button"
+                onClick={handleSnapshotClick}
+                aria-label="Capture Scene Snapshot"
+                className={`px-2.5 py-1 rounded-lg border font-mono text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  justCaptured
+                    ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400 cyber:bg-emerald-400 cyber:text-black lab:bg-emerald-600 lab:text-white lab:border-emerald-700'
+                    : 'bg-emerald-500/15 text-emerald-200 border-emerald-500/50 hover:bg-emerald-500/30 hover:border-emerald-400 cyber:bg-black cyber:text-emerald-300 cyber:border-emerald-400 cyber:hover:bg-emerald-400 cyber:hover:text-black lab:bg-emerald-700 lab:text-white lab:border-emerald-800 lab:hover:bg-emerald-800'
+                }`}
+                title="Capture high-resolution 2D thumbnail of the 3D scene and add it to the Session Log"
+              >
+                {justCaptured ? <Check className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />}
+                <span>{justCaptured ? 'Captured' : 'Snapshot'}</span>
               </button>
             )}
 
